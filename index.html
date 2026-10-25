@@ -63,6 +63,7 @@ table{width:100%;border-collapse:collapse;font-size:15px}td,th{padding:8px 4px;b
 <section style="display:grid;gap:16px">
 <div class="card" id="out"></div>
 <div class="card"><h2>Milestones</h2><table id="ms"></table></div>
+<p class="note" id="offl">Checking offline copy…</p>
 <p class="note">Everyone pays on time; vehicle prices hold; week 1 = Mon 19 Oct 2026. A projection, not a guarantee (Art 63). Priority slots first, the rest by random ballot (median of many ballots). Half slots pay and receive half.</p>
 </section>
 </main>
@@ -223,7 +224,10 @@ for(const [k,,min,max] of FIELDS){
 $('reserve').onchange=e=>{st.reserve=e.target.checked;render();};
 for(const k of ['tmin','tmax'])$(k).addEventListener('input',e=>{const v=Number(e.target.value);if(v>0){st[k]=v;render();}});
 sync();render();
-if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+const offl=$('offl');
+async function offlineCheck(){try{const k=await caches.open('resilience-v2');const ok=await k.match('./index.html');
+ offl.textContent=ok?'✓ Saved on this device — works without internet.':'Not saved for offline yet — keep this open while online for a few seconds, then reopen.';}catch(e){offl.textContent='Offline saving is not available in this browser.';}}
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').then(()=>navigator.serviceWorker.ready).then(()=>setTimeout(offlineCheck,800)).catch(offlineCheck);}else offlineCheck();
 </script>
 </body>
 </html>
