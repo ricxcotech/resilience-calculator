@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Resilience Calculator</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Resilience">
+<meta name="theme-color" content="#0f6b4f">
+<style>
+:root{--bg:#f4f5f2;--card:#fff;--ink:#17201c;--muted:#5d6a63;--line:#d9ded9;--accent:#0f6b4f;--okbg:#dff3e7;--ok:#0b6b3a;--badbg:#fbe3e0;--bad:#a8261b}
+@media (prefers-color-scheme:dark){:root{--bg:#101412;--card:#1a201d;--ink:#eaf0ec;--muted:#9aa8a0;--line:#2c3631;--accent:#3fbf93;--okbg:#17352a;--ok:#6fdca6;--badbg:#3b1d1a;--bad:#ff8f84}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.4 -apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:1000px;margin:0 auto;padding:16px;display:grid;gap:16px}
+@media (min-width:820px){main{grid-template-columns:minmax(320px,380px) 1fr;align-items:start}header{grid-column:1/-1}}
+h1{font-size:24px;margin:4px 0 0}h2{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px}
+.sub{color:var(--muted);font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
+.row{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;margin-bottom:14px}
+.row label{font-weight:600}
+.row input[type=range]{grid-column:1/-1;width:100%;height:32px;accent-color:var(--accent)}
+.row input[type=number],.row input[type=text]{width:130px;font-size:18px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);text-align:right}
+.row input.small{width:80px}
+.sw{display:flex;justify-content:space-between;align-items:center;min-height:44px;margin-bottom:10px}
+.sw input{width:28px;height:28px;accent-color:var(--accent)}
+button{font:600 17px -apple-system,system-ui,sans-serif;min-height:48px;padding:10px 14px;border-radius:12px;border:0;background:var(--accent);color:#fff;width:100%;margin-top:8px}
+@media (prefers-color-scheme:dark){button{color:#06130d}}
+button.alt{background:transparent;color:var(--accent);border:2px solid var(--accent)}
+.big{font-size:28px;font-weight:700;line-height:1.2}
+.tag{display:inline-block;padding:4px 12px;border-radius:999px;font-weight:700;font-size:15px}
+.tag.ok{background:var(--okbg);color:var(--ok)}.tag.bad{background:var(--badbg);color:var(--bad)}
+dl{margin:14px 0 0;display:grid;grid-template-columns:1fr auto;gap:8px 12px}dt{color:var(--muted)}dd{margin:0;font-weight:600;text-align:right}
+table{width:100%;border-collapse:collapse;font-size:15px}td,th{padding:8px 4px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--muted);font-weight:600;font-size:13px}td:last-child,th:last-child{text-align:right}
+.msg{margin-top:10px;padding:12px;border-radius:12px;background:var(--bg);border:1px solid var(--line);display:none}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.note{font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<header><h1>Resilience Car Club</h1><div class="sub">Projection calculator · works offline · nothing leaves this device</div></header>
+
+<section>
+<div class="card">
+<h2>Club today</h2>
+<div id="inputs"></div>
+<div class="sw"><label for="reserve"><b>Keep the Art 64 reserve</b><div class="sub">greater of R100,000 or 4 weeks of pool</div></label><input type="checkbox" id="reserve" checked></div>
+<div class="pair">
+<div class="row"><label for="tmin">Target from (months)</label><input id="tmin" class="small" type="number" inputmode="numeric" value="12"></div>
+<div class="row"><label for="tmax">to (months)</label><input id="tmax" class="small" type="number" inputmode="numeric" value="16"></div>
+</div>
+<button id="b-pay">Highest payout that fits the target</button>
+<button id="b-wk" class="alt">Weekly amount needed for this payout</button>
+<div class="msg" id="msg"></div>
+<button id="b-reset" class="alt" style="border-color:var(--line);color:var(--muted)">Reset to defaults</button>
+</div>
+</section>
+
+<section style="display:grid;gap:16px">
+<div class="card" id="out"></div>
+<div class="card"><h2>Milestones</h2><table id="ms"></table></div>
+<p class="note">Everyone pays on time; vehicle prices hold; week 1 = Mon 19 Oct 2026. A projection, not a guarantee (Art 63). Priority slots first, the rest by random ballot (median of many ballots). Half slots pay and receive half.</p>
+</section>
+</main>
+
+<script>
+// ===== MODEL-START (port of Resilience/scripts/report.py projection/cadence/milestone_rows) =====
+// Mersenne Twister, seeded and shuffled exactly like Python's random.Random(seed).shuffle
+function MT(seed){
+  const mt=new Array(624);let idx=624;
+  const imul=Math.imul;
+  function initGen(s){mt[0]=s>>>0;for(let i=1;i<624;i++){const p=mt[i-1]^(mt[i-1]>>>30);mt[i]=(imul(1812433253,p)+i)>>>0;}}
+  function initArr(key){
+    initGen(19650218);let i=1,j=0;const n=624;
+    for(let k=Math.max(n,key.length);k>0;k--){
+      const p=mt[i-1]^(mt[i-1]>>>30);
+      mt[i]=((mt[i]^imul(p,1664525))+key[j]+j)>>>0;i++;j++;
+      if(i>=n){mt[0]=mt[n-1];i=1;} if(j>=key.length)j=0;}
+    for(let k=n-1;k>0;k--){
+      const p=mt[i-1]^(mt[i-1]>>>30);
+      mt[i]=((mt[i]^imul(p,1566083941))-i)>>>0;i++;
+      if(i>=n){mt[0]=mt[n-1];i=1;}}
+    mt[0]=0x80000000;
+  }
+  function next(){
+    if(idx>=624){
+      for(let k=0;k<624;k++){
+        const y=(mt[k]&0x80000000)|(mt[(k+1)%624]&0x7fffffff);
+        mt[k]=mt[(k+397)%624]^(y>>>1)^((y&1)?0x9908b0df:0);}
+      idx=0;}
+    let y=mt[idx++];
+    y^=y>>>11;y^=(y<<7)&0x9d2c5680;y^=(y<<15)&0xefc60000;y^=y>>>18;
+    return y>>>0;
+  }
+  initArr([seed>>>0]);
+  function below(n){const k=32-Math.clz32(n);let r=next()>>>(32-k);while(r>=n)r=next()>>>(32-k);return r;}
+  return {shuffle(x){for(let i=x.length-1;i>0;i--){const j=below(i+1);const t=x[i];x[i]=x[j];x[j]=t;}}};
+}
+const EPOCH=Date.UTC(2026,9,19);
+const RES_FLOOR=100000,RES_WEEKS=4,LAG_DAYS=14,WK_PER_MONTH=30.44/7;
+function median(a){a=a.slice().sort((x,y)=>x-y);const n=a.length,h=n>>1;return n%2?a[h]:(a[h-1]+a[h])/2;}
+function weekEnd(w){return new Date(EPOCH+(7*(w-1)+6)*864e5);}
+// p: nPri,nFull,nHalf,opening,payout(full),wBefore(full),wAfter(full)
+function projection(p,runs){
+  runs=runs||400;
+  const S={full:{w:p.wBefore,a:p.wAfter,b:p.payout},half:{w:p.wBefore/2,a:p.wAfter/2,b:p.payout/2}};
+  const lag=1+Math.ceil(LAG_DAYS/7),out={};
+  for(const reserve of [true,false]){
+    const cars={};
+    for(let seed=0;seed<runs;seed++){
+      const rng=MT(seed);
+      const rest=[];for(let i=0;i<p.nFull;i++)rest.push('full');for(let i=0;i<p.nHalf;i++)rest.push('half');
+      rng.shuffle(rest);
+      const order=[];for(let i=0;i<p.nPri;i++)order.push('full');for(const t of rest)order.push(t);
+      const n=order.length,ben=new Array(n).fill(null);
+      let cash=p.opening,w=0,nxt=0;
+      while(nxt<n&&w<520){
+        w++;let pool=0;
+        for(let i=0;i<n;i++){const s=S[order[i]];pool+=(ben[i]&&w>=ben[i]+lag)?s.a:s.w;}
+        cash+=pool;
+        const floor=reserve?Math.max(RES_FLOOR,RES_WEEKS*pool):0;
+        while(nxt<n&&cash-S[order[nxt]].b>=floor){cash-=S[order[nxt]].b;ben[nxt]=w;(cars[nxt]=cars[nxt]||[]).push(w);nxt++;}
+      }
+    }
+    out[reserve]=Object.keys(cars).map(Number).sort((a,b)=>a-b).map(k=>Math.trunc(median(cars[k])));
+  }
+  const pool0=(p.nPri+p.nFull)*S.full.w+p.nHalf*S.half.w;
+  const liab=(p.nPri+p.nFull)*S.full.b+p.nHalf*S.half.b;
+  return {nPri:p.nPri,weeks:out,pool0,liab,S,lag};
+}
+function cadence(pr,reserve){
+  const wk=pr.weeks[reserve];
+  if(wk.length<2)return {gap:null,perMonth:null,label:'—'};
+  const gap=(wk[wk.length-1]-wk[0])/(wk.length-1),perMonth=WK_PER_MONTH/gap;
+  const label=gap<=1.25?'weekly':gap<=2.5?'every 2 weeks':gap<=3.5?'every 3 weeks':gap<=5?'monthly':'every '+Math.round(gap)+' weeks';
+  return {gap,perMonth,label};
+}
+// what a full member pays in weekly contributions over the cycle if they benefit in week bw
+function paidBy(pr,bw,endW){let t=0;for(let w=1;w<=endW;w++)t+=(w>=bw+pr.lag)?pr.S.full.a:pr.S.full.w;return t;}
+// ===== MODEL-END =====
+
+const DEF={nPri:7,nFull:8,nHalf:28,payout:250000,wBefore:2500,wAfter:3500,opening:323820,reserve:true,tmin:12,tmax:16};
+const FIELDS=[
+ ['nPri','Priority full slots',0,40,1],['nFull','Other full slots',0,60,1],['nHalf','Half slots',0,60,1],
+ ['payout','Payout (full slot), R',50000,600000,5000],['wBefore','Weekly before benefit, R',500,8000,50],
+ ['wAfter','Weekly after benefit, R',500,10000,50],['opening','Starting cash, R',0,2000000,5000]];
+let st=Object.assign({},DEF);
+try{const s=JSON.parse(localStorage.getItem('rcc')||'null');if(s)st=Object.assign(st,s);}catch(e){}
+const $=id=>document.getElementById(id);
+const R=n=>(n<0?'-':'')+'R'+Math.round(Math.abs(n)).toLocaleString('en-ZA').replace(/ /g,' ');
+const fmtD=d=>d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'});
+const fmtM=d=>d.toLocaleDateString('en-GB',{month:'short',year:'numeric',timeZone:'UTC'});
+
+const box=$('inputs');
+for(const [k,label,min,max,step] of FIELDS){
+  box.insertAdjacentHTML('beforeend',`<div class="row"><label for="n_${k}">${label}</label><input id="n_${k}" type="number" inputmode="numeric" min="${min}" step="${step}"><input id="r_${k}" type="range" min="${min}" max="${max}" step="${step}"></div>`);
+}
+function sync(){
+  for(const [k] of FIELDS){const n=$('n_'+k),r=$('r_'+k);if(document.activeElement!==n)n.value=st[k];r.value=st[k];}
+  $('reserve').checked=st.reserve;$('tmin').value=st.tmin;$('tmax').value=st.tmax;
+}
+function params(o){return Object.assign({},st,o||{});}
+function run(o,runs){return projection(params(o),runs||150);}
+function render(){
+  try{localStorage.setItem('rcc',JSON.stringify(st));}catch(e){}
+  const slots=st.nPri+st.nFull+st.nHalf;
+  if(slots<1){$('out').innerHTML='<p>Add at least one slot.</p>';$('ms').innerHTML='';return;}
+  const pr=run(),rs=st.reserve,wk=pr.weeks[rs],cd=cadence(pr,rs),end=wk[wk.length-1];
+  const mo=end/WK_PER_MONTH,within=mo<=st.tmax;
+  const nb=wk.length>1?`every ${cd.gap.toFixed(1)} weeks, about ${cd.perMonth.toFixed(1)} a month`:'';
+  let h=`<h2>Result</h2><div class="big">${cd.label==='—'?'Single vehicle':'A vehicle '+cd.label}</div><div class="sub">${nb}</div>
+  <p><span class="tag ${within?'ok':'bad'}">${within?'Within target':(mo-st.tmax).toFixed(1)+' months over'}</span> <span class="sub">target ${st.tmin}–${st.tmax} months${mo<st.tmin?' (finishes earlier than '+st.tmin+')':''}</span></p><dl>
+  <dt>First vehicle</dt><dd>Week ${wk[0]} · ${fmtD(weekEnd(wk[0]))}</dd>`;
+  if(st.nPri)h+=`<dt>All priority delivered</dt><dd>Week ${wk[st.nPri-1]} · ${fmtM(weekEnd(wk[st.nPri-1]))}</dd>`;
+  h+=`<dt>Cycle ends</dt><dd>Week ${end} · ${fmtD(weekEnd(end))}<br><span class="sub">${mo.toFixed(1)} months</span></dd>
+  <dt>Total payouts</dt><dd>${R(pr.liab)}</dd>
+  <dt>Weekly pool at start</dt><dd>${R(pr.pool0)}</dd>
+  <dt>Full member pays, first to benefit</dt><dd>${R(paidBy(pr,wk[0],end))}</dd>
+  <dt>Full member pays, last to benefit</dt><dd>${R(paidBy(pr,end,end))}</dd></dl>
+  <p class="note">Member totals are weekly contributions only (no deposit or priority fee). Without the Art 64 reserve the cycle ends in week ${pr.weeks[false].slice(-1)[0]}.</p>`;
+  $('out').innerHTML=h;
+  const L=[['First benefit',1],['All priority delivered','pri'],['10th benefit',10],['20th benefit',20],['Last benefit — cycle ends','last']];
+  let t='<tr><th>Milestone</th><th>Week</th><th>Date</th></tr>';
+  for(let [l,k] of L){
+    if(k==='pri'){if(!st.nPri)continue;k=st.nPri;} if(k==='last')k=wk.length; if(k>wk.length)continue;
+    t+=`<tr><td>${l}</td><td>${wk[k-1]}</td><td>${fmtD(weekEnd(wk[k-1]))}</td></tr>`;
+  }
+  $('ms').innerHTML=t;
+}
+const msg=t=>{const m=$('msg');m.style.display='block';m.innerHTML=t;};
+function months(o){const w=run(o,100).weeks[st.reserve];return w[w.length-1]/WK_PER_MONTH;}
+$('b-pay').onclick=()=>{
+  // highest payout (nearest R1,000) whose cycle fits the target maximum
+  let lo=20,hi=800,best=null;
+  if(months({payout:lo*1000})>st.tmax){msg('No payout of R20,000 or more fits the target with these weekly amounts.');return;}
+  while(lo<hi){const mid=Math.ceil((lo+hi)/2);if(months({payout:mid*1000})<=st.tmax)lo=mid;else hi=mid-1;}
+  best=lo*1000;
+  msg(`Highest payout that finishes within ${st.tmax} months: <b>${R(best)}</b> (half slot ${R(best/2)}). <button id="ap" class="alt">Use it</button>`);
+  $('ap').onclick=()=>{st.payout=best;sync();render();};
+};
+$('b-wk').onclick=()=>{
+  // smallest weekly-before (nearest R50) that fits; the after-benefit amount keeps today's ratio
+  const ratio=st.wAfter/st.wBefore;
+  const ok=w=>months({wBefore:w*50,wAfter:Math.round(w*50*ratio/50)*50})<=st.tmax;
+  let lo=10,hi=400;
+  if(!ok(hi)){msg('Even R20,000 a week would not finish within the target.');return;}
+  while(lo<hi){const mid=(lo+hi)>>1;if(ok(mid))hi=mid;else lo=mid+1;}
+  const b=lo*50,a=Math.round(b*ratio/50)*50;
+  msg(`To pay out ${R(st.payout)} and finish within ${st.tmax} months: <b>${R(b)} a week</b> before benefit, ${R(a)} after (a half slot pays half). <button id="ap" class="alt">Use it</button>`);
+  $('ap').onclick=()=>{st.wBefore=b;st.wAfter=a;sync();render();};
+};
+$('b-reset').onclick=()=>{st=Object.assign({},DEF);$('msg').style.display='none';sync();render();};
+for(const [k,,min,max] of FIELDS){
+  const set=v=>{v=Number(v);if(!isFinite(v))return;st[k]=Math.max(min,v);$('msg').style.display='none';render();};
+  $('n_'+k).addEventListener('input',e=>{if(e.target.value!=='')set(e.target.value);$('r_'+k).value=st[k];});
+  $('n_'+k).addEventListener('blur',sync);
+  $('r_'+k).addEventListener('input',e=>{set(e.target.value);sync();});
+}
+$('reserve').onchange=e=>{st.reserve=e.target.checked;render();};
+for(const k of ['tmin','tmax'])$(k).addEventListener('input',e=>{const v=Number(e.target.value);if(v>0){st[k]=v;render();}});
+sync();render();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
